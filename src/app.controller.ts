@@ -1,13 +1,16 @@
 import {
   Controller,
+  Inject,
   // Inject,
   //  OnModuleInit
 } from '@nestjs/common';
 
 import { AppService } from './app.service';
 import {
+  ClientKafka,
   // ClientKafka,
   EventPattern,
+  MessagePattern,
   // MessagePattern,
   // Payload,
 } from '@nestjs/microservices';
@@ -15,12 +18,14 @@ import { log } from 'console';
 import { Cat, UpdateCatDto } from './schemas/cat.schemas';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
+import { firstValueFrom } from 'rxjs';
 
 @Controller()
 export class AppController {
   constructor(
     private readonly appService: AppService,
     @InjectModel(Cat.name) private readonly catModel: Model<Cat>,
+    @Inject('OTHER_SERVICE') private readonly otherService: ClientKafka,
   ) {}
 
   @EventPattern('cat_created')
@@ -81,5 +86,41 @@ export class AppController {
     cat.set(body);
     await cat.save();
     log('time to update', new Date());
+  }
+
+  @EventPattern('kafka2-test-to-kafka3')
+  async handleKafka2TestToKafka3(data: any) {
+    log('kafka2-test-to-kafka3');
+    log('time to handle', new Date());
+    log('data received', data);
+    this.otherService.emit('receive-message', data);
+  }
+
+  /**
+   * เมื่อ microservice ได้รับ message จาก topic "demo-topic"
+   * ก็จะประมวลผลและ return เป็น response กลับไปให้ client
+   */
+
+  // MessagePattern คือ บ่งบอกว่าเราจะใช้ Kafka ในการรับข้อมูล (ฝั่ง consumer)
+  @MessagePattern('ping2')
+  async handleMessageKafka3TestToKafka2(data: any) {
+    log('ping2', data);
+    return { message: data, time: new Date() };
+  }
+
+  @MessagePattern('ping3')
+  async handleMessageKafka2TestToKafka3(data: any) {
+    log('ping3', data);
+    const response = await firstValueFrom(
+      this.otherService.send('ping4', {
+        message: 'Hi Ping 3',
+      }),
+    );
+
+    // ส่ง response จาก Microservice กลับให้ client
+    return {
+      msg: 'Ping 3 received microservice response',
+      data: response,
+    };
   }
 }
